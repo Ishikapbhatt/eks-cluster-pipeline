@@ -1,32 +1,66 @@
 pipeline {
     agent any
 
+    environment {
+        AWS_REGION = 'us-west-2'
+        CLUSTER_NAME = 'my-eks-cluster'
+        TF_VERSION = '1.6.2'
+    }
+
     stages {
-        stage("Checkout") {
+        stage('Checkout Code') {
             steps {
-                git branch: 'main', url: 'https://github.com/Ishikapbhatt/eks-cluster-pipeline.git'
+                checkout scm
             }
         }
 
-        stage("Build") {
+        stage('Setup Terraform') {
             steps {
                 sh '''
-                    terraform init
-                    terraform validate
+                curl -sLo terraform.zip https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip
+                unzip terraform.zip
+                sudo mv terraform /usr/local/bin/
+                terraform -version
                 '''
             }
         }
 
-        stage("Test") {
+        stage('Terraform Init') {
             steps {
-                sh 'terraform plan'
+                sh 'terraform init'
             }
         }
 
-        stage("Deploy") {
+        stage('Terraform Plan') {
             steps {
-                sh 'terraform apply --auto-approve'
+                sh 'terraform plan -out=tfplan'
             }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                sh 'terraform apply -auto-approve tfplan'
+            }
+        }
+
+        stage('Configure Kubectl') {
+            steps {
+                sh '''
+                aws eks update-kubeconfig \
+                  --region ${AWS_REGION} \
+                  --name ${CLUSTER_NAME}
+                kubectl get svc
+                '''
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo "Pipeline failed!"
+        }
+        success {
+            echo "EKS cluster provisioned successfully!"
         }
     }
 }
